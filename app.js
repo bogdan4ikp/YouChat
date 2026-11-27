@@ -980,9 +980,10 @@ let authQrPoll = null;
 let authQrCountdown = null;
 let syncInterval = null;
 
-async function enterAccount(user) {
+async function enterAccount(user, authMethod) {
   state.profile = { ...state.profile, ...user };
   localStorage.setItem('youchat_current_user', user.handle);
+  if (authMethod) localStorage.setItem('youchat_auth_method', authMethod);
   authScreen.classList.remove('open');
   clearInterval(authQrPoll);
   clearInterval(authQrCountdown);
@@ -1057,7 +1058,7 @@ async function startAuthQrSession() {
       try {
         const res = await window.YouChatAPI.getQrLoginStatus(token);
         if (res.status === 'confirmed' && res.user) {
-          await enterAccount(res.user);
+          await enterAccount(res.user, 'qr');
         } else if (res.status === 'expired') {
           startAuthQrSession();
         }
@@ -1082,8 +1083,24 @@ document.getElementById('authQrBtn').addEventListener('click', () => {
   startAuthQrSession();
 });
 
+function isDesktopOrTV() {
+  const ua = navigator.userAgent || '';
+  const isTV = /SmartTV|Tizen|Web0S|BRAVIA|AppleTV|GoogleTV|Android TV|NetCast|Viera/i.test(ua);
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  return isTV || !isMobile;
+}
+
+if (!isDesktopOrTV()) {
+  const qrDivider = document.getElementById('authQrDivider');
+  const qrBtn = document.getElementById('authQrBtn');
+  if (qrDivider) qrDivider.style.display = 'none';
+  if (qrBtn) qrBtn.style.display = 'none';
+  if (authQrBox) authQrBox.style.display = 'none';
+}
+
 document.getElementById('logoutBtn').addEventListener('click', () => {
   localStorage.removeItem('youchat_current_user');
+  localStorage.removeItem('youchat_auth_method');
   clearInterval(syncInterval);
   clearInterval(authQrPoll);
   clearInterval(authQrCountdown);
@@ -1091,7 +1108,7 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
   authScreen.classList.add('open');
 });
 
-// Auto-login if saved or returned from VK OAuth
+// Auto-login if saved (only VK or QR) or returned from VK OAuth
 (async () => {
   const params = new URLSearchParams(location.search);
   const vkLogin = params.get('vk_login');
@@ -1102,11 +1119,17 @@ document.getElementById('logoutBtn').addEventListener('click', () => {
   if (vkError) {
     alert(`Ошибка входа через ВКонтакте: ${vkError}`);
   }
+  const savedMethod = localStorage.getItem('youchat_auth_method');
+  const isValidSaved = savedMethod === 'vk' || savedMethod === 'qr';
+  if (!vkLogin && !isValidSaved) {
+    localStorage.removeItem('youchat_current_user');
+    return;
+  }
   const handleToLogin = vkLogin || localStorage.getItem('youchat_current_user');
   if (handleToLogin) {
     try {
       const { user } = await window.YouChatAPI.login(handleToLogin);
-      if (user) await enterAccount(user);
+      if (user) await enterAccount(user, vkLogin ? 'vk' : savedMethod);
     } catch {}
   }
 })();
