@@ -190,6 +190,7 @@ module.exports = async (req, res) => {
     const params = new URLSearchParams({
       client_id: VK_APP_ID,
       redirect_uri: VK_REDIRECT_URI,
+      origin: 'https://youchat-msg.ru',
       response_type: 'code',
       state: oauth.state,
       code_challenge: oauth.challenge,
