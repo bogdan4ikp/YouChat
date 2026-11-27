@@ -11,26 +11,23 @@
   <link rel="stylesheet" href="src/styles/chats.css?v=3" />
   <link rel="stylesheet" href="src/styles/profile.css?v=3" />
   <link rel="stylesheet" href="src/styles/modals.css?v=3" />
-  <link rel="stylesheet" href="src/styles/layout.css?v=4" />
+  <link rel="stylesheet" href="src/styles/layout.css?v=5" />
 </head>
 <body>
-  <!-- Auth / Start Screen -->
+  <!-- Auth / Start Screen (Forced Registration) -->
   <div class="modal-backdrop open" id="authScreen" style="z-index:200;">
     <div class="modal card" style="max-width:380px;text-align:center;">
       <h2 class="brand-logo" style="font-size:26px;margin-bottom:4px;">YouChat</h2>
-      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">Придумайте @username, чтобы создать аккаунт или войти</p>
-      <div class="form-group" style="text-align:left;">
-        <label>Юзернейм</label>
-        <input type="text" id="authHandleInput" placeholder="@bogdan" autocomplete="off" />
-      </div>
-      <button type="button" class="pill-btn" id="authLoginBtn">Продолжить</button>
-      <div style="font-size:12px;color:var(--text-muted);margin:4px 0;">или</div>
-      <button type="button" class="pill-btn secondary" id="authQrBtn">Войти по QR-коду</button>
-      <div id="authQrBox" style="display:none;margin-top:10px;">
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:14px;">Для входа и регистрации выберите один из способов</p>
+      <button type="button" class="pill-btn" id="authVkBtn" style="background:#0077FF;color:#fff;width:100%;">Войти через ВКонтакте</button>
+      <div style="font-size:12px;color:var(--text-muted);margin:8px 0;">или</div>
+      <button type="button" class="pill-btn secondary" id="authQrBtn" style="width:100%;">Войти по QR-коду</button>
+      <div id="authQrBox" style="display:none;margin-top:12px;">
         <div class="qr-card-preview">
           <canvas id="authQrCanvas" width="190" height="190"></canvas>
         </div>
-        <p style="font-size:12px;color:var(--text-secondary);margin-top:8px;">Отсканируйте этот QR-код в YouChat на другом устройстве</p>
+        <p id="authQrTimer" style="font-size:12px;color:var(--text-muted);margin-top:8px;">Новый код через 30с</p>
+        <p style="font-size:12px;color:var(--text-secondary);margin-top:4px;">Отсканируйте этот QR-код в YouChat на другом устройстве</p>
       </div>
     </div>
   </div>
