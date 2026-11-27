@@ -973,10 +973,11 @@ document.getElementById('closeQrLoginModal').addEventListener('click', () => {
 
 // Auth & Local Network Sync
 const authScreen = document.getElementById('authScreen');
-const authHandleInput = document.getElementById('authHandleInput');
 const authQrBox = document.getElementById('authQrBox');
 const authQrCanvas = document.getElementById('authQrCanvas');
+const authQrTimer = document.getElementById('authQrTimer');
 let authQrPoll = null;
+let authQrCountdown = null;
 let syncInterval = null;
 
 async function enterAccount(user) {
@@ -984,6 +985,7 @@ async function enterAccount(user) {
   localStorage.setItem('youchat_current_user', user.handle);
   authScreen.classList.remove('open');
   clearInterval(authQrPoll);
+  clearInterval(authQrCountdown);
   syncProfileUI();
   await syncNetworkUsersAndMessages();
   clearInterval(syncInterval);
@@ -1024,72 +1026,88 @@ async function syncNetworkUsersAndMessages() {
   } catch {}
 }
 
-async function handleAuthLogin() {
-  let raw = authHandleInput.value.trim();
-  if (!raw) return;
-  if (!raw.startsWith('@')) raw = '@' + raw;
-  try {
-    const { user, error } = await window.YouChatAPI.login(raw);
-    if (user) {
-      await enterAccount(user);
-      return;
-    }
-    if (error) {
-      alert(error);
-      return;
-    }
-  } catch {}
-  // Fallback if server is offline
-  await enterAccount({
-    handle: raw.toLowerCase(),
-    name: raw.replace(/^@/, ''),
-    avatar: '😎',
-    bio: 'В сети YouChat',
-  });
-}
-
-document.getElementById('authLoginBtn').addEventListener('click', handleAuthLogin);
-authHandleInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') handleAuthLogin();
+document.getElementById('authVkBtn').addEventListener('click', () => {
+  const base = location.protocol === 'file:' ? 'http://localhost:4173' : '';
+  location.href = `${base}/api/auth/vk`;
 });
 
-document.getElementById('authQrBtn').addEventListener('click', async () => {
-  authQrBox.style.display = 'block';
+async function startAuthQrSession() {
+  clearInterval(authQrPoll);
+  clearInterval(authQrCountdown);
+  let secondsLeft = 30;
+  if (authQrTimer) authQrTimer.textContent = `Новый код через ${secondsLeft}с`;
+
   try {
     const { token } = await window.YouChatAPI.createQrLogin();
     if (!token) return;
     requestAnimationFrame(() => {
       window.YouChatQR.drawQrMatrix(authQrCanvas, `youchat-auth://session/${token}`);
     });
-    clearInterval(authQrPoll);
+
+    authQrCountdown = setInterval(() => {
+      secondsLeft -= 1;
+      if (secondsLeft <= 0) {
+        startAuthQrSession();
+      } else if (authQrTimer) {
+        authQrTimer.textContent = `Новый код через ${secondsLeft}с`;
+      }
+    }, 1000);
+
     authQrPoll = setInterval(async () => {
       try {
         const res = await window.YouChatAPI.getQrLoginStatus(token);
         if (res.status === 'confirmed' && res.user) {
           await enterAccount(res.user);
+        } else if (res.status === 'expired') {
+          startAuthQrSession();
         }
       } catch {}
     }, 1200);
   } catch {
     const fallbackToken = Math.random().toString(36).slice(2, 10);
     window.YouChatQR.drawQrMatrix(authQrCanvas, `youchat-auth://session/${fallbackToken}`);
+    authQrCountdown = setInterval(() => {
+      secondsLeft -= 1;
+      if (secondsLeft <= 0) {
+        startAuthQrSession();
+      } else if (authQrTimer) {
+        authQrTimer.textContent = `Новый код через ${secondsLeft}с`;
+      }
+    }, 1000);
   }
+}
+
+document.getElementById('authQrBtn').addEventListener('click', () => {
+  authQrBox.style.display = 'block';
+  startAuthQrSession();
 });
 
 document.getElementById('logoutBtn').addEventListener('click', () => {
   localStorage.removeItem('youchat_current_user');
   clearInterval(syncInterval);
+  clearInterval(authQrPoll);
+  clearInterval(authQrCountdown);
   authQrBox.style.display = 'none';
-  authHandleInput.value = '';
   authScreen.classList.add('open');
 });
 
-// Auto-login if saved
+// Auto-login if saved or returned from VK OAuth
 (async () => {
-  const saved = localStorage.getItem('youchat_current_user');
-  if (saved) {
-    const { user } = await window.YouChatAPI.login(saved);
-    if (user) await enterAccount(user);
+  const params = new URLSearchParams(location.search);
+  const vkLogin = params.get('vk_login');
+  const vkError = params.get('vk_error');
+  if (vkLogin || vkError) {
+    history.replaceState(null, '', location.pathname);
+  }
+  if (vkError) {
+    alert(`Ошибка входа через ВКонтакте: ${vkError}`);
+  }
+  const handleToLogin = vkLogin || localStorage.getItem('youchat_current_user');
+  if (handleToLogin) {
+    try {
+      const { user } = await window.YouChatAPI.login(handleToLogin);
+      if (user) await enterAccount(user);
+    } catch {}
   }
 })();
 
