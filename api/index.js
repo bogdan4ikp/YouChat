@@ -1,9 +1,11 @@
 const fs = require('fs');
 const https = require('https');
+const crypto = require('crypto');
 
 const VK_APP_ID = process.env.VK_APP_ID || '';
 const VK_CLIENT_SECRET = process.env.VK_CLIENT_SECRET || '';
 const VK_SERVICE_TOKEN = process.env.VK_SERVICE_TOKEN || '';
+const VK_OAUTH_STATE_SECRET = process.env.VK_OAUTH_STATE_SECRET || '';
 // Always use the single canonical callback registered in the VK application settings.
 const VK_REDIRECT_URI = 'https://youchat-msg.ru/api/auth/vk/callback';
 
@@ -18,6 +20,63 @@ function fetchJson(targetUrl) {
     }).on('error', reject);
   });
 }
+
+function postFormJson(targetUrl, fields) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(targetUrl);
+    const body = new URLSearchParams(fields).toString();
+    const request = https.request({
+      hostname: target.hostname,
+      path: target.pathname + target.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, (resp) => {
+      let data = '';
+      resp.on('data', (chunk) => (data += chunk));
+      resp.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (resp.statusCode >= 400) return reject(new Error(parsed.error_description || parsed.error || 'VK request failed'));
+          resolve(parsed);
+        } catch (e) { reject(e); }
+      });
+    });
+    request.on('error', reject);
+    request.write(body);
+    request.end();
+  });
+}
+
+function createVkOAuthContext() {
+  const state = crypto.randomBytes(32).toString('base64url');
+  const verifier = crypto.randomBytes(48).toString('base64url');
+  const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
+  const payload = Buffer.from(JSON.stringify({ state, verifier, expiresAt: Date.now() + 10 * 60 * 1000 })).toString('base64url');
+  const signature = crypto.createHmac('sha256', VK_OAUTH_STATE_SECRET).update(payload).digest('base64url');
+  return { state, challenge, cookie: payload + '.' + signature };
+}
+
+function readVkOAuthContext(req) {
+  const raw = String(req.headers.cookie || '').split(';').map(v => v.trim()).find(v => v.startsWith('vk_oauth_ctx='));
+  if (!raw) return null;
+  const value = decodeURIComponent(raw.slice('vk_oauth_ctx='.length));
+  const parts = value.split('.');
+  if (parts.length !== 2) return null;
+  const expected = crypto.createHmac('sha256', VK_OAUTH_STATE_SECRET).update(parts[0]).digest();
+  let actual;
+  try { actual = Buffer.from(parts[1], 'base64url'); } catch { return null; }
+  if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    if (!data.state || !data.verifier || data.expiresAt < Date.now()) return null;
+    return data;
+  } catch { return null; }
+}
+
+const VK_COOKIE_SET = 'vk_oauth_ctx=; Domain=.youchat-msg.ru; Path=/api/auth/vk; HttpOnly; Secure; SameSite=Lax; Max-Age=0';
 
 const DATA_FILE = '/tmp/youchat-data.json';
 
@@ -123,53 +182,70 @@ module.exports = async (req, res) => {
   }
 
   if (p === '/api/auth/vk' && req.method === 'GET') {
-    if (!VK_APP_ID || !VK_CLIENT_SECRET) {
+    if (!VK_APP_ID || !VK_OAUTH_STATE_SECRET) {
       return res.status(503).json({ error: 'vk_oauth_not_configured' });
     }
-    const redirectUri = VK_REDIRECT_URI;
-    const params = new URLSearchParams({ client_id: VK_APP_ID, display: 'page', redirect_uri: redirectUri, response_type: 'code', v: '5.199' });
-    const vkAuthUrl = `https://oauth.vk.com/authorize?${params.toString()}`;
-    return res.redirect(302, vkAuthUrl);
+    const oauth = createVkOAuthContext();
+    res.setHeader('Set-Cookie', 'vk_oauth_ctx=' + encodeURIComponent(oauth.cookie) + '; Domain=.youchat-msg.ru; Path=/api/auth/vk; HttpOnly; Secure; SameSite=Lax; Max-Age=600');
+    const params = new URLSearchParams({
+      client_id: VK_APP_ID,
+      redirect_uri: VK_REDIRECT_URI,
+      response_type: 'code',
+      state: oauth.state,
+      code_challenge: oauth.challenge,
+      code_challenge_method: 'S256',
+      scope: 'vkid.personal_info',
+      provider: 'vkid',
+      prompt: 'login',
+      lang_id: 'ru',
+    });
+    return res.redirect(302, 'https://id.vk.ru/authorize?' + params.toString());
   }
 
   if (p === '/api/auth/vk/callback' && req.method === 'GET') {
+    const oauth = readVkOAuthContext(req);
     const code = url.searchParams.get('code');
-    if (!code) return res.redirect(302, '/?vk_error=no_code');
+    const returnedState = url.searchParams.get('state');
+    const deviceId = url.searchParams.get('device_id');
+    res.setHeader('Set-Cookie', VK_COOKIE_SET);
+    if (!oauth || !code || !deviceId || returnedState !== oauth.state) {
+      return res.redirect(302, '/?vk_error=state_or_callback_invalid');
+    }
     try {
-      const redirectUri = VK_REDIRECT_URI;
-      const tokenData = await fetchJson(
-        `https://oauth.vk.com/access_token?client_id=${VK_APP_ID}&client_secret=${VK_CLIENT_SECRET}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${encodeURIComponent(code)}`
-      );
-      if (tokenData.error || !tokenData.user_id) {
-        return res.redirect(302, `/?vk_error=${encodeURIComponent(tokenData.error_description || 'vk_auth_failed')}`);
+      const tokenUrl = new URL('https://id.vk.ru/oauth2/auth');
+      for (const [key, value] of Object.entries({
+        grant_type: 'authorization_code',
+        redirect_uri: VK_REDIRECT_URI,
+        client_id: VK_APP_ID,
+        code_verifier: oauth.verifier,
+        state: oauth.state,
+        device_id: deviceId,
+      })) tokenUrl.searchParams.set(key, value);
+      const tokenData = await postFormJson(tokenUrl.toString(), { code });
+      if (tokenData.error || !tokenData.access_token) {
+        return res.redirect(302, '/?vk_error=vk_token_exchange_failed');
       }
-      const userId = String(tokenData.user_id);
-      let name = `VK User ${userId}`;
-      let avatar = '🔵';
-      let handle = `@vk_${userId}`;
-      try {
-        const profileData = await fetchJson(
-          `https://api.vk.com/method/users.get?user_ids=${userId}&fields=photo_200,screen_name&access_token=${tokenData.access_token || VK_SERVICE_TOKEN}&v=5.199`
-        );
-        const vkUser = profileData.response && profileData.response[0];
-        if (vkUser) {
-          name = `${vkUser.first_name || ''} ${vkUser.last_name || ''}`.trim() || name;
-          if (vkUser.screen_name) handle = normalizeHandle(vkUser.screen_name) || handle;
-          if (vkUser.photo_200) avatar = vkUser.photo_200;
-        }
-      } catch {}
+      const profileData = await postFormJson(
+        'https://id.vk.ru/oauth2/user_info?client_id=' + encodeURIComponent(VK_APP_ID),
+        { access_token: tokenData.access_token }
+      );
+      const user = profileData.user || profileData;
+      const userId = String(user.user_id || user.id || tokenData.user_id || '');
+      if (!userId) return res.redirect(302, '/?vk_error=vk_profile_missing');
+      const name = [user.first_name, user.last_name].filter(Boolean).join(' ').trim() || ('VK User ' + userId);
+      const avatar = user.avatar || user.avatar_url || user.photo_200 || '🔵';
+      const handle = '@vk_' + userId;
       db.users[handle] = {
         ...(db.users[handle] || {}),
-        handle,
-        name,
-        avatar,
+        handle, name, avatar,
         bio: 'Вход через ВКонтакте',
         vkId: userId,
       };
       saveDb();
-      return res.redirect(302, `/?vk_login=${encodeURIComponent(handle)}`);
-    } catch {
-      return res.redirect(302, '/?vk_error=server_error');
+      return res.redirect(302, '/?vk_login=' + encodeURIComponent(handle));
+    } catch (error) {
+      console.error('VK ID callback failed:', error && error.message);
+      return res.redirect(302, '/?vk_error=vk_auth_failed');
     }
   }
 
