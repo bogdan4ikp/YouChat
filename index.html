@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouChat — Мессенджер</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="src/styles/base.css?v=3" />
+  <link rel="stylesheet" href="src/styles/chats.css?v=3" />
+  <link rel="stylesheet" href="src/styles/profile.css?v=3" />
+  <link rel="stylesheet" href="src/styles/modals.css?v=3" />
+  <link rel="stylesheet" href="src/styles/layout.css?v=4" />
+</head>
+<body>
+  <!-- Auth / Start Screen -->
+  <div class="modal-backdrop open" id="authScreen" style="z-index:200;">
+    <div class="modal card" style="max-width:380px;text-align:center;">
+      <h2 class="brand-logo" style="font-size:26px;margin-bottom:4px;">YouChat</h2>
+      <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px;">Придумайте @username, чтобы создать аккаунт или войти</p>
+      <div class="form-group" style="text-align:left;">
+        <label>Юзернейм</label>
+        <input type="text" id="authHandleInput" placeholder="@bogdan" autocomplete="off" />
+      </div>
+      <button type="button" class="pill-btn" id="authLoginBtn">Продолжить</button>
+      <div style="font-size:12px;color:var(--text-muted);margin:4px 0;">или</div>
+      <button type="button" class="pill-btn secondary" id="authQrBtn">Войти по QR-коду</button>
+      <div id="authQrBox" style="display:none;margin-top:10px;">
+        <div class="qr-card-preview">
+          <canvas id="authQrCanvas" width="190" height="190"></canvas>
+        </div>
+        <p style="font-size:12px;color:var(--text-secondary);margin-top:8px;">Отсканируйте этот QR-код в YouChat на другом устройстве</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="app-shell">
+    <!-- Compact Left Dock -->
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <div class="brand">
+          <span class="brand-logo">YouChat</span>
+          <span class="brand-version">v1.3.0</span>
+        </div>
+
+        <nav class="nav-menu" id="navMenu">
+          <button class="nav-item active" data-view="chats" title="Чаты">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+            </svg>
+            <span>Чаты</span>
+            <span class="nav-badge" id="totalUnreadBadge">0</span>
+          </button>
+
+          <button class="nav-item" data-view="search" title="Поиск">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"/>
+              <path d="m21 21-4.3-4.3"/>
+            </svg>
+            <span>Поиск</span>
+          </button>
+
+          <button class="nav-item" data-view="notifications" title="Уведомления">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+            <span>Уведомления</span>
+            <span class="nav-dot"></span>
+          </button>
+
+          <button class="nav-item" data-view="profile" title="Профиль">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+            <span>Профиль</span>
+          </button>
+        </nav>
+      </div>
+
+      <div class="sidebar-bottom">
+        <button class="nav-item logout-btn" id="logoutBtn" title="Выйти">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          <span>Выйти</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <!-- CHATS VIEW -->
+      <section class="view active" id="view-chats">
+        <div class="chats-layout">
+          <!-- Chat List Pane -->
+          <div class="chat-list-pane">
+            <div class="mobile-top-bar">
+              <span class="brand-logo">YouChat</span>
+              <span class="brand-version">v1.3.0</span>
+            </div>
+            <div class="pane-header">
+              <div class="segmented-tabs" id="chatFilterTabs">
+                <span class="seg-indicator" id="chatFilterIndicator"></span>
+                <button class="seg-tab active" data-filter="all">Все</button>
+                <button class="seg-tab" data-filter="direct">Личные</button>
+                <button class="seg-tab" data-filter="groups">Группы</button>
+              </div>
+            </div>
+
+            <div class="search-box">
+              <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <path d="m21 21-4.3-4.3"/>
+              </svg>
+              <input type="text" id="chatSearchInput" placeholder="Поиск по чатам..." />
+            </div>
+
+            <div class="chat-list" id="chatList"></div>
+          </div>
+
+          <!-- Active Chat Pane -->
+          <div class="chat-window-pane">
+            <div class="chat-header" id="chatHeader">
+              <div class="chat-header-user">
+                <button class="icon-btn mobile-back-btn" id="mobileBackBtn" title="Назад">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="15 18 9 12 15 6"/>
+                  </svg>
+                </button>
+                <div class="avatar-wrap">
+                  <div class="avatar" id="activeChatAvatar">🦊</div>
+                  <span class="status-dot online" id="activeChatStatusDot"></span>
+                </div>
+                <div>
+                  <div class="chat-header-name" id="activeChatName">Алиса</div>
+                  <div class="chat-header-status" id="activeChatStatus">в сети</div>
+                </div>
+              </div>
+              <div class="chat-header-actions">
+                <button class="icon-btn" title="Поиск в чате" id="chatInfoToggle">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="1"/>
+                    <circle cx="19" cy="12" r="1"/>
+                    <circle cx="5" cy="12" r="1"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div class="messages-area" id="messagesArea"></div>
+
+            <div class="sticker-drawer" id="stickerDrawer">
+              <div class="sticker-drawer-header">
+                <span>Стикеры</span>
+                <button type="button" class="pill-btn secondary small-btn" id="openCreateStickerBtn">+ Создать стикер</button>
+              </div>
+              <div class="sticker-grid" id="stickerGrid"></div>
+            </div>
+
+            <form class="composer-bar tg-composer" id="messageForm">
+              <button type="button" class="tg-circle-btn" title="Прикрепить файл" id="attachBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                </svg>
+              </button>
+
+              <div class="tg-input-pill" id="tgInputPill">
+                <input type="text" id="messageInput" placeholder="Сообщение" autocomplete="off" />
+                <button type="button" class="tg-emoji-inside" title="Стикеры" id="emojiBtn">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+                    <line x1="9" y1="9" x2="9.01" y2="9"/>
+                    <line x1="15" y1="9" x2="15.01" y2="9"/>
+                  </svg>
+                </button>
+              </div>
+
+              <div class="voice-recording-ui" id="voiceRecordingUI" style="display:none;">
+                <span class="rec-dot"></span>
+                <span class="voice-timer" id="voiceTimer">0:00</span>
+                <div class="voice-bars" id="voiceBars">
+                  <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+                </div>
+                <button type="button" class="icon-btn cancel-rec-btn" id="cancelVoiceBtn" title="Отменить">✕</button>
+              </div>
+
+              <button type="button" class="tg-circle-btn voice-btn" title="Голосовое сообщение" id="voiceBtn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+              </button>
+
+              <button type="submit" class="tg-circle-btn tg-send-btn" id="sendBtn" style="display:none;" title="Отправить">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <line x1="22" y1="2" x2="11" y2="13"/>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                </svg>
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- SEARCH VIEW -->
+      <section class="view" id="view-search">
+        <div class="center-container">
+          <div class="card">
+            <h2 class="section-title">Поиск людей и каналов</h2>
+            <div class="search-box large">
+              <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <path d="m21 21-4.3-4.3"/>
+              </svg>
+              <input type="text" id="globalSearchInput" placeholder="Введите имя или @username..." />
+            </div>
+            <div class="search-results" id="globalSearchResults"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- NOTIFICATIONS VIEW -->
+      <section class="view" id="view-notifications">
+        <div class="center-container">
+          <div class="card">
+            <div class="card-header-row">
+              <h2 class="section-title">Уведомления</h2>
+              <button class="text-btn" id="markAllReadBtn">Прочитать все</button>
+            </div>
+            <div class="notif-list" id="notifList"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PROFILE VIEW -->
+      <section class="view" id="view-profile">
+        <div class="center-container">
+          <div class="card profile-card">
+            <div class="profile-top-clean">
+              <div class="profile-avatar-lg" id="profileAvatar">😎</div>
+              <div class="profile-identity-clean">
+                <div class="profile-name-row">
+                  <h1 class="profile-name" id="profileName">Богдан</h1>
+                  <span class="status-pill online">в сети</span>
+                </div>
+                <div class="profile-handle" id="profileHandle">@bogdan_yc</div>
+              </div>
+            </div>
+
+            <div class="profile-actions-center">
+              <button class="pill-btn small-btn" id="openMyQrBtn">Мой QR-код</button>
+              <button class="pill-btn secondary small-btn" id="editProfileBtn">Редактировать профиль</button>
+            </div>
+
+            <div class="profile-info-list">
+              <div class="info-row">
+                <span class="info-label">О себе</span>
+                <span class="info-value" id="profileBio">Дизайн, код и ночные разговоры в YouChat 🌙</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Username</span>
+                <span class="info-value" id="profileHandleRow">@bogdan_yc</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Сообщений в Избранном</span>
+                <span class="info-value" id="profileMsgCount">0</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card settings-card">
+            <h3 class="section-subtitle">Настройки аккаунта</h3>
+            <div class="setting-row">
+              <div>
+                <div class="setting-title">Статус «В сети»</div>
+                <div class="setting-desc">Показывать друзьям, когда вы онлайн</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" checked />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-title">Уведомления о сообщениях</div>
+                <div class="setting-desc">Звук и всплывающие баннеры</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" checked />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-title">Компактный режим</div>
+                <div class="setting-desc">Больше сообщений на одном экране</div>
+              </div>
+              <label class="switch">
+                <input type="checkbox" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="setting-row">
+              <div>
+                <div class="setting-title">Вход по QR-коду</div>
+                <div class="setting-desc">Авторизация с другого устройства (отдельно от профиля)</div>
+              </div>
+              <button type="button" class="pill-btn secondary small-btn" id="openQrLoginBtn">Открыть</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Edit Profile Modal -->
+  <div class="modal-backdrop" id="editProfileModal">
+    <div class="modal card">
+      <h3 class="section-title">Редактировать профиль</h3>
+      <div class="form-group">
+        <label>Аватар (эмодзи)</label>
+        <input type="text" id="editAvatarInput" maxlength="2" />
+      </div>
+      <div class="form-group">
+        <label>Имя</label>
+        <input type="text" id="editNameInput" />
+      </div>
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="editHandleInput" />
+      </div>
+      <div class="form-group">
+        <label>О себе</label>
+        <textarea id="editBioInput" rows="3"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="pill-btn secondary" id="cancelEditProfile">Отмена</button>
+        <button class="pill-btn" id="saveEditProfile">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Sticker Modal -->
+  <div class="modal-backdrop" id="createStickerModal">
+    <div class="modal card">
+      <h3 class="section-title">Создать стикер</h3>
+      <div class="form-group">
+        <label>Фото или видео (необязательно)</label>
+        <input type="file" id="stickerMediaInput" accept="image/*,video/*" />
+      </div>
+      <div class="form-group">
+        <label>Или эмодзи / короткий текст</label>
+        <input type="text" id="stickerTextInput" placeholder="🔥 или ОК" maxlength="6" />
+      </div>
+      <div class="form-group">
+        <label>Цвет фона (для текста/эмодзи)</label>
+        <input type="color" id="stickerBgInput" value="#27272a" />
+      </div>
+      <div class="modal-actions">
+        <button class="pill-btn secondary" id="cancelCreateSticker">Отмена</button>
+        <button class="pill-btn" id="saveCreateSticker">Создать</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sticker Action Modal -->
+  <div class="modal-backdrop" id="stickerActionModal">
+    <div class="modal card" style="max-width:340px;text-align:center;">
+      <div id="stickerActionPreview" style="display:flex;justify-content:center;margin:6px 0;"></div>
+      <h3 class="section-title" id="stickerActionTitle">Стикер</h3>
+      <p style="font-size:13px;color:var(--text-secondary);" id="stickerActionDesc"></p>
+      <div class="modal-actions" style="justify-content:center;">
+        <button class="pill-btn secondary" id="cancelStickerAction">Отмена</button>
+        <button class="pill-btn" id="confirmStickerAction">Сохранить</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- My QR & Scanner Modal (for finding account) -->
+  <div class="modal-backdrop" id="myQrModal">
+    <div class="modal card" style="max-width:380px;">
+      <div class="segmented-tabs" id="qrModalTabs">
+        <button type="button" class="seg-tab active" data-qrtab="show">Мой QR-код</button>
+        <button type="button" class="seg-tab" data-qrtab="scan">Сканер QR</button>
+      </div>
+
+      <div id="qrTabShow" class="qr-tab-pane">
+        <div class="qr-card-preview">
+          <canvas id="myQrCanvas" width="210" height="210"></canvas>
+          <div class="qr-user-handle" id="qrUserHandle">@bogdan_yc</div>
+        </div>
+        <div class="modal-actions" style="justify-content:center;">
+          <button type="button" class="pill-btn secondary" id="downloadQrBtn">Скачать</button>
+          <button type="button" class="pill-btn" id="shareQrToChatBtn">Поделиться в чат</button>
+        </div>
+      </div>
+
+      <div id="qrTabScan" class="qr-tab-pane" style="display:none;">
+        <div class="qr-scanner-box">
+          <video id="qrScannerVideo" autoplay playsinline muted></video>
+          <div class="qr-scan-frame"></div>
+        </div>
+        <div id="qrScanResult" class="qr-scan-result">Наведите камеру на QR-код</div>
+        <div class="modal-actions" style="justify-content:center;">
+          <label class="pill-btn secondary" style="cursor:pointer;">
+            Загрузить из галереи
+            <input type="file" id="qrFileInput" accept="image/*" style="display:none;" />
+          </label>
+        </div>
+      </div>
+
+      <button type="button" class="pill-btn secondary" id="closeMyQrModal">Закрыть</button>
+    </div>
+  </div>
+
+  <!-- Share QR to Chat Picker Modal -->
+  <div class="modal-backdrop" id="shareChatPickerModal">
+    <div class="modal card" style="max-width:360px;">
+      <h3 class="section-title">Отправить QR-код в чат</h3>
+      <div class="chat-picker-list" id="shareChatPickerList"></div>
+      <div class="modal-actions">
+        <button type="button" class="pill-btn secondary" id="cancelShareChatPicker">Отмена</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- QR Login Modal (completely separate from profile QR; camera only, no gallery) -->
+  <div class="modal-backdrop" id="qrLoginModal">
+    <div class="modal card" style="max-width:380px;text-align:center;">
+      <h3 class="section-title">Вход по QR-коду</h3>
+      <div class="segmented-tabs" id="qrLoginTabs">
+        <button type="button" class="seg-tab active" data-logintab="show">Код входа</button>
+        <button type="button" class="seg-tab" data-logintab="scan">Сканировать</button>
+      </div>
+
+      <div id="loginTabShow" class="qr-tab-pane">
+        <p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:10px;">Отсканируйте этот одноразовый код камерой другого устройства.</p>
+        <div class="qr-card-preview">
+          <canvas id="loginQrCanvas" width="200" height="200"></canvas>
+        </div>
+        <div class="modal-actions" style="justify-content:center;margin-top:12px;">
+          <button type="button" class="pill-btn secondary" id="refreshLoginQrBtn">Обновить код</button>
+        </div>
+      </div>
+
+      <div id="loginTabScan" class="qr-tab-pane" style="display:none;">
+        <p style="font-size:12.5px;color:var(--text-secondary);margin-bottom:10px;">Наведите камеру на QR-код входа (загрузка из галереи отключена).</p>
+        <div class="qr-scanner-box">
+          <video id="loginScannerVideo" autoplay playsinline muted></video>
+          <div class="qr-scan-frame"></div>
+        </div>
+        <div id="loginScanResult" class="qr-scan-result">Ожидание QR-кода входа...</div>
+      </div>
+
+      <button type="button" class="pill-btn" id="closeQrLoginModal">Закрыть</button>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <script src="src/js/api.js?v=2"></script>
+  <script src="src/js/qr.js?v=2"></script>
+  <script src="app.js?v=2"></script>
+</body>
+</html>
