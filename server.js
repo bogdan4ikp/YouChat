@@ -4,9 +4,11 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const VK_APP_ID = '54926583';
-const VK_CLIENT_SECRET = '5CLje5kqaETUa4Bq8a6c';
-const VK_SERVICE_TOKEN = '3a6ce4ff3a6ce4ff3a6ce4ffbd392af80833a6c3a6ce4ff516565471deecbd191c223cf';
+const VK_APP_ID = process.env.VK_APP_ID || '';
+const VK_CLIENT_SECRET = process.env.VK_CLIENT_SECRET || '';
+const VK_SERVICE_TOKEN = process.env.VK_SERVICE_TOKEN || '';
+// Always use the single canonical callback registered in the VK application settings.
+const VK_REDIRECT_URI = 'https://youchat-msg.ru/api/auth/vk/callback';
 
 function fetchJson(targetUrl) {
   return new Promise((resolve, reject) => {
@@ -167,10 +169,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (p === '/api/auth/vk' && req.method === 'GET') {
-    const proto = req.headers['x-forwarded-proto'] || 'http';
-    const host = req.headers.host || `localhost:${PORT}`;
-    const redirectUri = `${proto}://${host}/api/auth/vk/callback`;
-    const vkAuthUrl = `https://oauth.vk.com/authorize?client_id=${VK_APP_ID}&display=page&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&v=5.199`;
+    if (!VK_APP_ID || !VK_CLIENT_SECRET) {
+      return sendJson(res, 503, { error: 'vk_oauth_not_configured' });
+    }
+    const redirectUri = VK_REDIRECT_URI;
+    const params = new URLSearchParams({ client_id: VK_APP_ID, display: 'page', redirect_uri: redirectUri, response_type: 'code', v: '5.199' });
+    const vkAuthUrl = `https://oauth.vk.com/authorize?${params.toString()}`;
     res.writeHead(302, { Location: vkAuthUrl });
     res.end();
     return;
@@ -184,9 +188,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     try {
-      const proto = req.headers['x-forwarded-proto'] || 'http';
-      const host = req.headers.host || `localhost:${PORT}`;
-      const redirectUri = `${proto}://${host}/api/auth/vk/callback`;
+      const redirectUri = VK_REDIRECT_URI;
       const tokenData = await fetchJson(
         `https://oauth.vk.com/access_token?client_id=${VK_APP_ID}&client_secret=${VK_CLIENT_SECRET}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${encodeURIComponent(code)}`
       );
