@@ -1,4 +1,21 @@
 const fs = require('fs');
+const https = require('https');
+
+const VK_APP_ID = '54926583';
+const VK_CLIENT_SECRET = '5CLje5kqaETUa4Bq8a6c';
+const VK_SERVICE_TOKEN = '3a6ce4ff3a6ce4ff3a6ce4ffbd392af80833a6c3a6ce4ff516565471deecbd191c223cf';
+
+function fetchJson(targetUrl) {
+  return new Promise((resolve, reject) => {
+    https.get(targetUrl, (resp) => {
+      let data = '';
+      resp.on('data', (chunk) => (data += chunk));
+      resp.on('end', () => {
+        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+      });
+    }).on('error', reject);
+  });
+}
 
 const DATA_FILE = '/tmp/youchat-data.json';
 
@@ -103,17 +120,72 @@ module.exports = async (req, res) => {
     return res.status(200).json({ message: msg });
   }
 
+  if (p === '/api/auth/vk' && req.method === 'GET') {
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    const host = req.headers.host || 'youchat-msg.ru';
+    const redirectUri = `${proto}://${host}/api/auth/vk/callback`;
+    const vkAuthUrl = `https://oauth.vk.com/authorize?client_id=${VK_APP_ID}&display=page&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&v=5.199`;
+    return res.redirect(302, vkAuthUrl);
+  }
+
+  if (p === '/api/auth/vk/callback' && req.method === 'GET') {
+    const code = url.searchParams.get('code');
+    if (!code) return res.redirect(302, '/?vk_error=no_code');
+    try {
+      const proto = req.headers['x-forwarded-proto'] || 'https';
+      const host = req.headers.host || 'youchat-msg.ru';
+      const redirectUri = `${proto}://${host}/api/auth/vk/callback`;
+      const tokenData = await fetchJson(
+        `https://oauth.vk.com/access_token?client_id=${VK_APP_ID}&client_secret=${VK_CLIENT_SECRET}&redirect_uri=${encodeURIComponent(redirectUri)}&code=${encodeURIComponent(code)}`
+      );
+      if (tokenData.error || !tokenData.user_id) {
+        return res.redirect(302, `/?vk_error=${encodeURIComponent(tokenData.error_description || 'vk_auth_failed')}`);
+      }
+      const userId = String(tokenData.user_id);
+      let name = `VK User ${userId}`;
+      let avatar = '🔵';
+      let handle = `@vk_${userId}`;
+      try {
+        const profileData = await fetchJson(
+          `https://api.vk.com/method/users.get?user_ids=${userId}&fields=photo_200,screen_name&access_token=${tokenData.access_token || VK_SERVICE_TOKEN}&v=5.199`
+        );
+        const vkUser = profileData.response && profileData.response[0];
+        if (vkUser) {
+          name = `${vkUser.first_name || ''} ${vkUser.last_name || ''}`.trim() || name;
+          if (vkUser.screen_name) handle = normalizeHandle(vkUser.screen_name) || handle;
+          if (vkUser.photo_200) avatar = vkUser.photo_200;
+        }
+      } catch {}
+      db.users[handle] = {
+        ...(db.users[handle] || {}),
+        handle,
+        name,
+        avatar,
+        bio: 'Вход через ВКонтакте',
+        vkId: userId,
+      };
+      saveDb();
+      return res.redirect(302, `/?vk_login=${encodeURIComponent(handle)}`);
+    } catch {
+      return res.redirect(302, '/?vk_error=server_error');
+    }
+  }
+
   if (p === '/api/qr-login/create' && req.method === 'POST') {
     const token = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-    db.qrSessions[token] = { status: 'pending', handle: null };
+    const expiresAt = Date.now() + 30000;
+    db.qrSessions[token] = { status: 'pending', handle: null, expiresAt };
     saveDb();
-    return res.status(200).json({ token });
+    return res.status(200).json({ token, expiresAt });
   }
 
   if (p === '/api/qr-login/status' && req.method === 'GET') {
     const token = url.searchParams.get('token');
     const sess = db.qrSessions[token];
     if (!sess) return res.status(404).json({ error: 'Not found' });
+    if (sess.status === 'pending' && sess.expiresAt && Date.now() > sess.expiresAt) {
+      return res.status(200).json({ status: 'expired', user: null });
+    }
     return res.status(200).json({
       status: sess.status,
       user: sess.handle ? db.users[sess.handle] : null,
@@ -124,6 +196,9 @@ module.exports = async (req, res) => {
     const sess = db.qrSessions[body.token];
     const handle = normalizeHandle(body.handle);
     if (!sess || !db.users[handle]) return res.status(400).json({ error: 'Invalid token or user' });
+    if (sess.expiresAt && Date.now() > sess.expiresAt) {
+      return res.status(400).json({ error: 'QR-код истёк, отсканируйте новый' });
+    }
     sess.status = 'confirmed';
     sess.handle = handle;
     saveDb();
